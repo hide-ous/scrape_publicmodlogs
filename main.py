@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 
 import praw as praw
 import requests
+from ratelimit import limits, sleep_and_retry
 
 MOD = "publicmodlogs"
 FEED = '7e9b27126097f51ae6c9cd5b049af34891da6ba6'
@@ -52,6 +53,21 @@ def stopping_condition(decode, going_forward, before, after):
     return before, after, do_break
 
 
+@sleep_and_retry
+@limits(calls=1, period=1)
+def get_modlog_once(s, modlog_url, modactions, going_forward, before, after):
+    http = s.get(modlog_url)  # Make request to Reddit API
+    if http.status_code != 200:  # This error handing is extremely basic.  Please improve.
+        print(http.status_code)  # Print HTTP error status code to STDOUT
+        do_break = True
+    else:
+        decode = json.loads(http.content)
+        modactions.append(k['data'] for j in decode for i in j for k in i['data']['children'])
+
+        before, after, do_break = stopping_condition(decode, going_forward, before, after)
+    return before, after, do_break
+
+
 def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=500, last_modaction_fname=None):
     modactions=list()
 
@@ -62,21 +78,9 @@ def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=
 
     do_break=False
     while not do_break:
-        time.sleep(1)  # Sleep for one second to avoid going over API limits
         modlog_url = build_modlog_url(subreddit_name_unprefixed, feed, mod, limit, going_forward, before, after)
-        # def get_modlog_once(modlog_url, modactions, going_forward, before, after):
-        http = s.get(modlog_url)  # Make request to Reddit API
-        if http.status_code != 200:  # This error handing is extremely basic.  Please improve.
-            print(http.status_code)  # Print HTTP error status code to STDOUT
-            break
-
-        decode = json.loads(http.content)
-        modactions.append(decode.copy())
-
-        before, after, do_break = stopping_condition(decode, going_forward, before, after)
-
-    modactions_flat = [k['data'] for j in modactions for i in j for k in i['data']['children']]
-    return modactions_flat
+        before, after, do_break = get_modlog_once(s, modlog_url, modactions, going_forward, before, after)
+    return modactions
 
 
 def get_resume_data(subreddit_name_unprefixed, last_modaction_fname):
