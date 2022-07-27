@@ -2,12 +2,14 @@ import json
 import os
 import pathlib
 import pickle
+import re
 import time
 from urllib.parse import urlencode
 
 import praw as praw
 import requests
 import schedule as schedule
+import unicodedata
 from tqdm import tqdm
 from ratelimit import limits, sleep_and_retry
 
@@ -46,7 +48,7 @@ def stopping_condition(decode, going_forward, before, after):
     # stopping conditions
     if not len(decode['data']['children']):
         do_break=True
-    if going_forward:
+    elif going_forward:
         if before == decode['data']['children'][0]['data']['id']:
             do_break=True
         # the modaction of the most recent element
@@ -68,7 +70,8 @@ def stopping_condition(decode, going_forward, before, after):
 def __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, after):
     http = s.get(modlog_url)  # Make request to Reddit API
     if http.status_code != 200:  # This error handing is extremely basic.  Please improve.
-        print(http.status_code)  # Print HTTP error status code to STDOUT
+        http.raise_for_status()
+        print(http.content, http.status_code)  # Print HTTP error status code to STDOUT
         do_break = True
     else:
         decode = json.loads(http.content)
@@ -85,28 +88,49 @@ def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=
     after=None
     going_forward, before=get_resume_data(subreddit_name_unprefixed, last_modaction_fname)
 
+    pgcntr = 0
     do_break=False
     while not do_break:
         modlog_url = build_modlog_url(subreddit_name_unprefixed, feed, mod, limit, going_forward, before, after)
         before, after, do_break = __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, after)
+        pgcntr+=1
     return modactions
 
 
 def read_resume_data(dest_file):
     start_positions=dict()
-    if os.path.isfile(dest_file):
-        print( 'reading previous data')
-        with open(dest_file) as f:
+    if os.path.exists(dest_file):
+        with open(dest_file,'rb') as f:
             start_positions = pickle.load(f)
     return start_positions
 
 
+def slugify(value, allow_unicode=False):
+    """
+    Taken from https://github.com/django/django/blob/master/django/utils/text.py
+    Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
+    dashes to single dashes. Remove characters that aren't alphanumerics,
+    underscores, or hyphens. Convert to lowercase. Also strip leading and
+    trailing whitespace, dashes, and underscores.
+    """
+    value = str(value)
+    if allow_unicode:
+        value = unicodedata.normalize('NFKC', value)
+    else:
+        value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+    value = re.sub(r'[^\w\s-]', '', value.lower())
+    return re.sub(r'[-\s]+', '-', value).strip('-_')
+
+
 def store_resume_data(modactions, subreddit_name_unprefixed, dest_file=RESUME_PATH):
+    if not len(modactions):
+        return
     start_positions = read_resume_data(dest_file)
-    last_utc = max(action['created_utc'] for action in modactions)
-    start_positions.update({subreddit_name_unprefixed:last_utc})
+    modactions = sorted(modactions, key=lambda action: float(action['created_utc']))
+    last_id = modactions[-1]['id']
+    start_positions.update({subreddit_name_unprefixed:last_id})
     create_dirs(dest_file)
-    with open(dest_file, 'wb') as f:
+    with open(dest_file, 'wb+') as f:
         pickle.dump(start_positions, f)
 
 
@@ -126,7 +150,9 @@ def create_dirs(dest_file):
         pathlib.Path(os.path.dirname(dest_file)).mkdir(parents=True, exist_ok=True)
 
 def store_modlogs(modactions, subreddit_name_unprefixed, fpath_template=MODACTIONS_PATH_TEMPLATE):
-    dest_file= fpath_template.format(subreddit=subreddit_name_unprefixed)
+    if not len(modactions):
+        return
+    dest_file= fpath_template.format(subreddit=slugify(subreddit_name_unprefixed))
     create_dirs(dest_file)
     with open(dest_file, 'a+', encoding='utf8') as f:
         f.write('\n'.join(map(json.dumps, modactions)) + '\n')
@@ -134,7 +160,7 @@ def store_modlogs(modactions, subreddit_name_unprefixed, fpath_template=MODACTIO
 def get_a_scrapin():
     reddit = get_reddit()
     user_agent = reddit.config.user_agent
-    subreddits = list(get_moderated_subreddits(reddit))
+    subreddits = list(get_moderated_subreddits(reddit))[::-1]
     for subreddit in (pbar := tqdm(subreddits)):
         pbar.set_description("Processing %s" % subreddit)
         modactions = get_modlog(subreddit, user_agent)
