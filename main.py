@@ -6,20 +6,28 @@ from urllib.parse import urlencode
 
 import praw as praw
 import requests
+import schedule as schedule
 from ratelimit import limits, sleep_and_retry
 
 MOD = "publicmodlogs"
 FEED = '7e9b27126097f51ae6c9cd5b049af34891da6ba6'
+CALLS=1 # rate limiting
+PERIOD=1 # rate limiting
+MODACTIONS_PATH_TEMPLATE= os.path.join('data', '{subreddit}.njson')
+RESUME_PATH=os.path.join('data', 'resume.pkl')
 
-def get_moderated_subreddits(mod=MOD):
-    reddit = praw.Reddit()
+def get_reddit(config_interpolation='basic'):
+    reddit = praw.Reddit(config_interpolation=config_interpolation)
     reddit.read_only = True
+    return reddit
+
+def get_moderated_subreddits(reddit, mod=MOD):
     redditor = reddit.redditor(mod)
     subreddits = list(redditor.moderated())
     return subreddits
 
 
-def build_modlog_url(subreddit_name_unprefixed, feed=FEED, mod=MOD, limit=500, going_forward=True, before=None, after=None):
+def build_modlog_url(subreddit_name_unprefixed, feed=FEED, mod=MOD, limit=500, going_forward=False, before=None, after=None):
 
     base_url=f'https://www.reddit.com/r/{subreddit_name_unprefixed}/about/log/.json?'
     params = dict(limit=limit, user=mod, feed=feed)
@@ -54,53 +62,81 @@ def stopping_condition(decode, going_forward, before, after):
 
 
 @sleep_and_retry
-@limits(calls=1, period=1)
-def get_modlog_once(s, modlog_url, modactions, going_forward, before, after):
+@limits(calls=CALLS, period=PERIOD)
+def __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, after):
     http = s.get(modlog_url)  # Make request to Reddit API
     if http.status_code != 200:  # This error handing is extremely basic.  Please improve.
         print(http.status_code)  # Print HTTP error status code to STDOUT
         do_break = True
     else:
         decode = json.loads(http.content)
-        modactions.append(k['data'] for j in decode for i in j for k in i['data']['children'])
-
+        modactions.extend([k['data'] for j in decode for i in j for k in i['data']['children']])
         before, after, do_break = stopping_condition(decode, going_forward, before, after)
-    return before, after, do_break
+    return before, after, do_break # caller should check do_break right after the function call
 
 
-def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=500, last_modaction_fname=None):
+def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=500, last_modaction_fname=RESUME_PATH):
     modactions=list()
 
     s = requests.Session()
     s.headers.update({'User-Agent' : user_agent})
-
-    going_forward, before, after=get_resume_data(subreddit_name_unprefixed, last_modaction_fname)
+    after=None
+    going_forward, before=get_resume_data(subreddit_name_unprefixed, last_modaction_fname)
 
     do_break=False
     while not do_break:
         modlog_url = build_modlog_url(subreddit_name_unprefixed, feed, mod, limit, going_forward, before, after)
-        before, after, do_break = get_modlog_once(s, modlog_url, modactions, going_forward, before, after)
+        before, after, do_break = __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, after)
     return modactions
 
 
-def get_resume_data(subreddit_name_unprefixed, last_modaction_fname):
+def read_resume_data(dest_file):
+    start_positions=dict()
+    if os.path.isfile(dest_file):
+        print( 'reading previous data')
+        with open(dest_file) as f:
+            start_positions = pickle.load(f)
+    return start_positions
+
+
+def store_resume_data(modactions, subreddit_name_unprefixed, dest_file=RESUME_PATH):
+    start_positions = read_resume_data(dest_file)
+    last_utc = max(action['created_utc'] for action in modactions)
+    start_positions.update({subreddit_name_unprefixed:last_utc})
+    with open(dest_file, 'wb') as f:
+        pickle.dump(start_positions, f)
+
+
+def get_resume_data(subreddit_name_unprefixed, dest_file=RESUME_PATH):
     # check if we already scraped the sub. if so, only get newer entries
     #see if a previous iteration left off somewhere; if so, we can pick up from there, and only get the incremental update. otherwise, we will get the entire log.
-    start_positions = dict()
-    if os.path.isfile(last_modaction_fname):
-        print( 'reading previous data')
-        with open(last_modaction_fname) as f:
-            start_positions = pickle.load(f)
+    start_positions = read_resume_data(dest_file)
     going_forward = subreddit_name_unprefixed in start_positions
     before=None
-    after=None
     if going_forward:
         before = start_positions[subreddit_name_unprefixed]
+    return going_forward, before
 
-    return going_forward, before, after
 
+def store_modlogs(modactions, subreddit_name_unprefixed, fpath_template=MODACTIONS_PATH_TEMPLATE):
+    dest_file= fpath_template.format(subreddit=subreddit_name_unprefixed)
 
+    with open(dest_file, 'a+', encoding='utf8') as f:
+        f.write('\n'.join(map(json.dumps, modactions)) + '\n')
+
+def get_a_scrapin():
+    reddit = get_reddit()
+    user_agent = reddit.config.user_agent
+    for subreddit in get_moderated_subreddits():
+        modactions = get_modlog(subreddit, user_agent)
+        store_modlogs(modactions, subreddit)
+        store_resume_data(modactions, subreddit)
 
 if __name__ == '__main__':
-    for subreddit in get_moderated_subreddits():
-        print(build_modlog_url(subreddit))
+    #scrape once
+    get_a_scrapin()
+    schedule.every().hour.do(get_a_scrapin)
+    #keep on scraping forever
+    while True:
+        schedule.run_pending()
+        time.sleep(60) # wait one minute
