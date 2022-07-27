@@ -10,6 +10,7 @@ import praw as praw
 import requests
 import schedule as schedule
 import unicodedata
+from requests import HTTPError
 from tqdm import tqdm
 from ratelimit import limits, sleep_and_retry
 
@@ -68,16 +69,20 @@ def stopping_condition(decode, going_forward, before, after):
 @sleep_and_retry
 @limits(calls=CALLS, period=PERIOD)
 def __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, after):
-    http = s.get(modlog_url)  # Make request to Reddit API
-    if http.status_code != 200:  # This error handing is extremely basic.  Please improve.
+    try:
+        http = s.get(modlog_url)  # Make request to Reddit API
         http.raise_for_status()
-        print(http.content, http.status_code)  # Print HTTP error status code to STDOUT
-        do_break = True
-    else:
         decode = json.loads(http.content)
         modactions.extend([k['data'] for k in decode['data']['children']])
         before, after, do_break = stopping_condition(decode, going_forward, before, after)
-    return before, after, do_break # caller should check do_break right after the function call
+    except HTTPError as e:
+        if http.status_code == 429:  # This error handing is extremely basic.  Please improve.
+            raise e
+        else:
+            print(e)  # Print HTTP error to STDOUT
+            do_break = True
+    finally:
+        return before, after, do_break # caller should check do_break right after the function call
 
 
 def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=500, last_modaction_fname=RESUME_PATH):
@@ -88,12 +93,10 @@ def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=
     after=None
     going_forward, before=get_resume_data(subreddit_name_unprefixed, last_modaction_fname)
 
-    pgcntr = 0
     do_break=False
     while not do_break:
         modlog_url = build_modlog_url(subreddit_name_unprefixed, feed, mod, limit, going_forward, before, after)
         before, after, do_break = __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, after)
-        pgcntr+=1
     return modactions
 
 
