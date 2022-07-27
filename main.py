@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 import pickle
 import time
 from urllib.parse import urlencode
@@ -103,6 +104,7 @@ def store_resume_data(modactions, subreddit_name_unprefixed, dest_file=RESUME_PA
     start_positions = read_resume_data(dest_file)
     last_utc = max(action['created_utc'] for action in modactions)
     start_positions.update({subreddit_name_unprefixed:last_utc})
+    create_dirs(dest_file)
     with open(dest_file, 'wb') as f:
         pickle.dump(start_positions, f)
 
@@ -118,9 +120,13 @@ def get_resume_data(subreddit_name_unprefixed, dest_file=RESUME_PATH):
     return going_forward, before
 
 
+def create_dirs(dest_file):
+    if not os.path.exists(dest_file):
+        pathlib.Path(os.path.dirname(dest_file)).mkdir(parents=True, exist_ok=True)
+
 def store_modlogs(modactions, subreddit_name_unprefixed, fpath_template=MODACTIONS_PATH_TEMPLATE):
     dest_file= fpath_template.format(subreddit=subreddit_name_unprefixed)
-
+    create_dirs(dest_file)
     with open(dest_file, 'a+', encoding='utf8') as f:
         f.write('\n'.join(map(json.dumps, modactions)) + '\n')
 
