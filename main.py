@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 import praw as praw
 import requests
 import schedule as schedule
+from tqdm import tqdm
 from ratelimit import limits, sleep_and_retry
 
 MOD = "publicmodlogs"
@@ -71,7 +72,7 @@ def __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, afte
         do_break = True
     else:
         decode = json.loads(http.content)
-        modactions.extend([k['data'] for j in decode for i in j for k in i['data']['children']])
+        modactions.extend([k['data'] for k in decode['data']['children']])
         before, after, do_break = stopping_condition(decode, going_forward, before, after)
     return before, after, do_break # caller should check do_break right after the function call
 
@@ -133,7 +134,9 @@ def store_modlogs(modactions, subreddit_name_unprefixed, fpath_template=MODACTIO
 def get_a_scrapin():
     reddit = get_reddit()
     user_agent = reddit.config.user_agent
-    for subreddit in get_moderated_subreddits():
+    subreddits = list(get_moderated_subreddits(reddit))
+    for subreddit in (pbar := tqdm(subreddits)):
+        pbar.set_description("Processing %s" % subreddit)
         modactions = get_modlog(subreddit, user_agent)
         store_modlogs(modactions, subreddit)
         store_resume_data(modactions, subreddit)
