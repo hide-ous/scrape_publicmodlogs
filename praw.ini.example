@@ -1,0 +1,35 @@
+[DEFAULT]
+
+# A boolean to indicate whether or not to check for package updates.
+check_for_updates=True
+
+# Object to kind mappings
+comment_kind=t1
+message_kind=t4
+redditor_kind=t2
+submission_kind=t3
+subreddit_kind=t5
+trophy_kind=t6
+
+# The URL prefix for OAuth-related requests.
+oauth_url=https://oauth.reddit.com
+
+# The amount of seconds of ratelimit to sleep for upon encountering a specific type of 429 error.
+ratelimit_seconds=5
+
+# The URL prefix for regular requests.
+reddit_url=https://www.reddit.com
+
+# The URL prefix for short URLs.
+short_url=https://redd.it
+
+
+client_id=CUSTOMIZE_WITH_YOUR_INFO
+client_secret=CUSTOMIZE_WITH_YOUR_INFO
+refresh_token=CUSTOMIZE_WITH_YOUR_INFO
+password=CUSTOMIZE_WITH_YOUR_INFO
+
+bot_name=CUSTOMIZE_WITH_YOUR_INFO
+bot_version=CUSTOMIZE_WITH_YOUR_INFO
+bot_author=CUSTOMIZE_WITH_YOUR_INFO
+user_agent=script:%(bot_name)s:v%(bot_version)s (by u/%(bot_author)s)
