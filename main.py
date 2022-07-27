@@ -124,6 +124,28 @@ def slugify(value, allow_unicode=False):
     value = re.sub(r'[^\w\s-]', '', value.lower())
     return re.sub(r'[-\s]+', '-', value).strip('-_')
 
+def build_resume_data(fpath_template=MODACTIONS_PATH_TEMPLATE, dest_file=RESUME_PATH):
+    _, fpath_ext = os.path.splitext(fpath_template)
+    fpath_dir = os.path.dirname(fpath_template)
+    start_positions = dict()
+    for fname in os.listdir(fpath_dir):
+        if fname.endswith(fpath_ext):
+            subreddit_slugified = fname[:-len(fpath_ext)]
+            max_utc=None
+            max_id=None
+            with open(os.path.join(fpath_dir, fname), 'r', encoding='utf-8') as f:
+                for line in f:
+                    action = json.loads(line)
+                    id, created_utc = action['id'], float(action['created_utc'])
+                    if (max_utc is None) or (created_utc>max_utc):
+                        max_utc = created_utc
+                        max_id = id
+            if max_id:
+                start_positions[subreddit_slugified] = max_id
+
+    create_dirs(dest_file)
+    with open(dest_file, 'wb+') as f:
+        pickle.dump(start_positions, f)
 
 def store_resume_data(modactions, subreddit_name_unprefixed, dest_file=RESUME_PATH):
     if not len(modactions):
@@ -131,7 +153,7 @@ def store_resume_data(modactions, subreddit_name_unprefixed, dest_file=RESUME_PA
     start_positions = read_resume_data(dest_file)
     modactions = sorted(modactions, key=lambda action: float(action['created_utc']))
     last_id = modactions[-1]['id']
-    start_positions.update({subreddit_name_unprefixed:last_id})
+    start_positions.update({slugify(subreddit_name_unprefixed):last_id})
     create_dirs(dest_file)
     with open(dest_file, 'wb+') as f:
         pickle.dump(start_positions, f)
@@ -141,10 +163,10 @@ def get_resume_data(subreddit_name_unprefixed, dest_file=RESUME_PATH):
     # check if we already scraped the sub. if so, only get newer entries
     #see if a previous iteration left off somewhere; if so, we can pick up from there, and only get the incremental update. otherwise, we will get the entire log.
     start_positions = read_resume_data(dest_file)
-    going_forward = subreddit_name_unprefixed in start_positions
+    going_forward = slugify(subreddit_name_unprefixed) in start_positions
     before=None
     if going_forward:
-        before = start_positions[subreddit_name_unprefixed]
+        before = start_positions[slugify(subreddit_name_unprefixed)]
     return going_forward, before
 
 
@@ -160,7 +182,7 @@ def store_modlogs(modactions, subreddit_name_unprefixed, fpath_template=MODACTIO
     with open(dest_file, 'a+', encoding='utf8') as f:
         f.write('\n'.join(map(json.dumps, modactions)) + '\n')
 
-def get_a_scrapin():
+def get_all_modlogs():
     reddit = get_reddit()
     user_agent = reddit.config.user_agent
     subreddits = list(get_moderated_subreddits(reddit))[::-1]
@@ -171,9 +193,10 @@ def get_a_scrapin():
         store_resume_data(modactions, subreddit)
 
 if __name__ == '__main__':
+    # build_resume_data()
     #scrape once
-    get_a_scrapin()
-    schedule.every().hour.do(get_a_scrapin)
+    get_all_modlogs()
+    schedule.every().hour.do(get_all_modlogs)
     #keep on scraping forever
     while True:
         schedule.run_pending()
