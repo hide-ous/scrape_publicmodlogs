@@ -38,12 +38,12 @@ git clone https://github.com/hide-ous/scrape_publicmodlogs.git
 cd scrape_publicmodlogs
 ```
 (recommended) use a new virtual environment, e.g.,
-```
+```shell
 python -m venv venv
 source venv/bin/activate 
 ```
 then install dependencies and run
-```
+```shell
 pip install -r requirements.txt
 python -u main.py
 ```
