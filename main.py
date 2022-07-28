@@ -100,7 +100,7 @@ def get_modlog(subreddit_name_unprefixed, user_agent, feed=FEED, mod=MOD, limit=
     return modactions
 
 
-def read_resume_data(dest_file):
+def read_resume_data(dest_file=RESUME_PATH):
     start_positions=dict()
     if os.path.exists(dest_file):
         with open(dest_file,'rb') as f:
