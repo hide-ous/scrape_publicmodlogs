@@ -196,7 +196,7 @@ if __name__ == '__main__':
     # build_resume_data()
     #scrape once
     get_all_modlogs()
-    schedule.every().hour.do(get_all_modlogs)
+    schedule.every().day.do(get_all_modlogs)
     #keep on scraping forever
     while True:
         schedule.run_pending()
