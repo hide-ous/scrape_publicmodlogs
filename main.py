@@ -72,6 +72,7 @@ def stopping_condition(decode, going_forward, before, after):
 @sleep_and_retry
 @limits(calls=CALLS, period=PERIOD)
 def __get_one_modlog_page(s, modlog_url, modactions, going_forward, before, after):
+    do_break = False
     try:
         http = s.get(modlog_url)  # Make request to Reddit API
         http.raise_for_status()
