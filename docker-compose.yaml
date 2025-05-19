@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  reddit_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/data
+      - ./praw.ini:/praw.ini
